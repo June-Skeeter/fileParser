@@ -1,0 +1,4 @@
+{
+    "columnNames":["variableName","units","processing","dataType"],
+    "indexName":"timestamp"
+}
