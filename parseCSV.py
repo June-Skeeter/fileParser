@@ -32,6 +32,7 @@ class HOBOcsv:
     # HOBO csv outputs have messy headers and inconsistent date formats
     # Can try to auto-parse, but best approach is to define explicitly
     def __init__(self):
+        self.fileFormat='HOBOcsv'
         self.skiprows=2
 
     def read(self,fileName,header=None):
@@ -60,10 +61,10 @@ class HOBOcsv:
         self.dataTable.index = pd.Index(index,name=settings['indexName'])
         return(self.dataTable)
 
-T1 = time.time()
-tf = ['2026/20260930/20750527-SHSC.WSM.SGT.250718.csv','2025/20250718/20750528-SHSC.SSM.SGT.240720_250718.csv','2025/20250718/20750528-SHSC.SSM.SGT.csv']
-testFile='/mnt/e/data-dump/SCL/'
-for t in tf:
-    tmp = HOBOcsv().read(os.path.join(testFile,t))
-    print(tmp.head())
-print(time.time()-T1)
+# T1 = time.time()
+# tf = ['2026/20260930/20750527-SHSC.WSM.SGT.250718.csv','2025/20250718/20750528-SHSC.SSM.SGT.240720_250718.csv','2025/20250718/20750528-SHSC.SSM.SGT.csv']
+# testFile='/mnt/e/data-dump/SCL/'
+# for t in tf:
+#     tmp = HOBOcsv().read(os.path.join(testFile,t))
+#     print(tmp.head())
+# print(time.time()-T1)

@@ -102,11 +102,7 @@ class TOB3(csiTable):
             self.recordSize = struct.calcsize('>'+self.byteMap)
             self.recordsPerFrame = int((self.frameSize-self.headerSize-self.footerSize)/self.recordSize)
             self.byteMap_Body = '>'+''.join([self.byteMap for r in range(self.recordsPerFrame)])
-            try:
-                self.readFrames(fileObject.read())
-            except Exception as e:
-                fileObject.close()
-                exit(e)
+            self.readFrames(fileObject.read())
 
     def translateTypes(self,dtypes):
         csiTypeMap = {
@@ -129,7 +125,6 @@ class TOB3(csiTable):
         self.byteMap = ''.join(self.byteMap)
         return(pyTypes)
 
-    
     def readFrames(self,fileObject,stepSize=1):
         lrec = struct.calcsize('iii')+struct.calcsize(self.byteMap_Body)+struct.calcsize('i')
         ct = 0
@@ -138,33 +133,33 @@ class TOB3(csiTable):
         T0 = time.time()
         for i in range(0,self.nframes,stepSize):
             cts = ct+lrec
-            inidices,rows  = self.decodeFrame(fileObject[ct:cts])
+            indices,rows  = self.decodeFrame(fileObject[ct:cts])
             ct = cts
-            if inidices == []:
+            if indices == []:
                 break
-            for row,ix in zip(rows,inidices):
+            for row,ix in zip(rows,indices):
                 data.append(row)
                 index.append(ix)
         if len(index) == 0:
-            return(None,None)
-        elif stepSize > 1:
-            return(
-                pd.to_datetime((index[0][0]*1e9)+index[0][1],unit='ns').floor(freq='1s').to_pydatetime(),
-                pd.to_datetime((index[-1][0]*1e9)+index[-1][1],unit='ns').ceil(freq='1s').to_pydatetime()
-            )
-        index = pd.DataFrame(index)
-        index=pd.to_datetime(index[0]*1e9+index[1],unit='ns')
-        self.dataTable = pd.DataFrame(
-            data=data,
-            index=pd.Index(index,name=settings['indexName']),
-            columns=pd.MultiIndex.from_tuples([tuple([self.header[k][j] for k in range(2,6)]) for j in range(len(self.header[2]))],names=settings['columnNames'])
-            )
-        self.dataTable = self.dataTable.astype({c:self.dtypes[i] for i,c in enumerate(self.dataTable.columns)})
+            self.dataTable = pd.DataFrame(
+                data=data,
+                index=pd.Index(index,name=settings['indexName']),
+                columns=pd.MultiIndex.from_tuples([tuple([self.header[k][j] for k in range(2,6)]) for j in range(len(self.header[2]))],names=settings['columnNames'])
+                )
+        else:
+            index = pd.DataFrame(index)
+            index=pd.to_datetime(index[0]*1e9+index[1],unit='ns')
+            self.dataTable = pd.DataFrame(
+                data=data,
+                index=pd.Index(index,name=settings['indexName']),
+                columns=pd.MultiIndex.from_tuples([tuple([self.header[k][j] for k in range(2,6)]) for j in range(len(self.header[2]))],names=settings['columnNames'])
+                )
+            self.dataTable = self.dataTable.astype({c:self.dtypes[i] for i,c in enumerate(self.dataTable.columns)})
         
-    def decodeFrame(self,frame):
-        frame = [struct.unpack('iii', frame[:self.headerSize]),
-                 struct.unpack(self.byteMap_Body, frame[self.headerSize:-self.footerSize]),
-                 struct.unpack('i',frame[-self.footerSize:])[0]]
+    def decodeFrame(self,chunk):
+        frame = [struct.unpack('iii', chunk[:self.headerSize]),
+                 struct.unpack(self.byteMap_Body, chunk[self.headerSize:-self.footerSize]),
+                 struct.unpack('i',chunk[-self.footerSize:])[0]]
         frame[0] = [int((frame[0][0]+self.campbellBaseTime)),int((frame[0][1]*self.frameResolution)*1e9),frame[0][2]]
         if 'H' in self.byteMap_Body:
             frame[1] = self.decode_fp2(frame[1])
@@ -172,6 +167,7 @@ class TOB3(csiTable):
         frame[1] = [frame[1][i*npr:(i+1)*npr] for i in range(self.recordsPerFrame)]
         # True/False flag for valid frame
         # Adapted from https://github.com/ansell/camp2ascii/blob/cea750fb721df3d3ccc69fe7780b372d20a8160d/frame_read.c#L109
+        
         footerValidation = (0xFFFF0000 & frame[2]) >> 16
         footerOffset = (0x000007FF & frame[2])
         frame[2] = (footerValidation == self.validationStamp)
@@ -213,6 +209,6 @@ class TOB3(csiTable):
         return(Body)
     
 T1 = time.time()
-testFile='/mnt/d/data-dump/SCL/2025/20250806/57840_Time_Series_27.dat'
+testFile='/mnt/e/data-dump/SCL/2026/20260801/57840_Flux_CSFormat_33.dat'
 tmp = TOB3().read(testFile)
 print(time.time()-T1)
