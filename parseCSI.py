@@ -33,6 +33,7 @@ class csiTable:
         self.program=self.header[0][5]
 
     def read(self,fileName):
+        print(f'Reading: {fileName}')
         if self.fileFormat == 'TOA5':
             self.readTOA5(fileName)
         elif self.fileFormat == 'TOB3':

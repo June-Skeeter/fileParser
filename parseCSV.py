@@ -17,6 +17,7 @@ def replace_hobo_garbage(text,unit_text = [(' C ','C')]):
                 text.replace(u[0],'')
                 unit = u[1]
         return((text,unit,'',''))
+    breakpoint()
     pattern = r'"[^"]*"'
     text = text.replace('#','record')
     text = re.sub(r"LGR.*?,", ",", text)
@@ -33,31 +34,29 @@ class HOBOcsv:
     # Can try to auto-parse, but best approach is to define explicitly
     def __init__(self):
         self.fileFormat='HOBOcsv'
-        self.skiprows=2
+        self.skiprows=1
 
     def read(self,fileName,header=None):
-        print(fileName)
+        print(f'Reading: {fileName}')
         with open(fileName,'rb') as f:
             for l in range(self.skiprows):
                 line = f.readline().decode('ascii',errors='ignore')
                 if l == 1:
-                    header = replace_hobo_garbage(line)
-        self.dataTable = pd.read_csv(fileName,skiprows=self.skiprows,header=None,encoding_errors='replace')
+                    if '"' not in line:
+                        breakpoint()
+        self.dataTable = pd.read_csv(fileName,skiprows=self.skiprows,header=0,encoding_errors='replace')
         float_cols = self.dataTable.select_dtypes(include=["float64"]).columns
         self.dataTable[float_cols] = self.dataTable[float_cols].astype('float32')
         int_cols = self.dataTable.select_dtypes(include=["int64"]).columns
         self.dataTable[int_cols] = self.dataTable[int_cols].astype('uint32')
-        try:
-            self.dataTable.columns = [h[0] for h in header]
-        except:
-            breakpoint()
+        self.dataTable.columns = [re.sub(r"[^a-zA-Z0-9#]", " ", h).replace('#','record') for h in self.dataTable.columns]
         if 'Date' and 'Time' in self.dataTable.columns:
             index = pd.to_datetime(self.dataTable['Date']+'T'+self.dataTable['Time'],format='%y/%m/%dT%H:%M:%S')
         else:
             date_time = self.dataTable.columns[self.dataTable.columns.str.contains('Date Time')][0]
             index = pd.to_datetime(self.dataTable[date_time])
 
-        self.dataTable.columns = pd.MultiIndex.from_tuples([(h[0],h[1],h[2],str(self.dataTable.dtypes[h[0]])) for h in header],names=settings['columnNames'])
+        self.dataTable.columns = pd.MultiIndex.from_tuples([(h,'','',str(t)) for h,t in self.dataTable.dtypes.items()],names=settings['columnNames'])
         self.dataTable.index = pd.Index(index,name=settings['indexName'])
         return(self.dataTable)
 
