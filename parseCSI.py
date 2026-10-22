@@ -208,7 +208,7 @@ class TOB3(csiTable):
             Body[ix] = FP2_map(Body[ix])
         return(Body)
     
-T1 = time.time()
-testFile='/mnt/e/data-dump/SCL/2026/20260801/57840_Flux_CSFormat_33.dat'
-tmp = TOB3().read(testFile)
-print(time.time()-T1)
+# T1 = time.time()
+# testFile='/mnt/e/data-dump/SCL/2026/20260801/57840_Flux_CSFormat_33.dat'
+# tmp = TOB3().read(testFile)
+# print(time.time()-T1)
