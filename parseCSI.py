@@ -7,15 +7,22 @@ import time
 import os
 import re
 
-
 with open(os.path.join(os.path.split(__file__)[0],'templates','settings.json')) as f:
     settings = json.load(f)
 
 # @dataclass(kw_only=True)
 class csiTable:
 
-    def __init__(self):
+    def __init__(self,kwargs):
+        if kwargs == {}:
+            kwargs = settings['kwargDefaults']
         self.campbellBaseTime = 631152000.0
+        if 'duplicates' in kwargs and 'keep' in kwargs['duplicates']:
+            self.keep = kwargs['duplicates']['keep']
+        else:
+            print('Warning: no keep method specified for duplicates: ',(settings['kwargDefaults']))
+            self.keep = None
+            breakpoint()
 
     def parseHeader(self,fileObject):
         # Read header and parse common parameters between formats
@@ -38,14 +45,23 @@ class csiTable:
             self.readTOA5(fileName)
         elif self.fileFormat == 'TOB3':
             self.readTOB3(fileName)
+        if self.dataTable.index.duplicated().sum():
+            if self.keep is None:
+                exit((f'Warning: Duplicated timestamps in: {fileName}\n{self.dataTable.index[self.dataTable.index.duplicated(keep=False)].values}specify kwargs duplicates methods in kwagrs'))
+            elif self.keep not in ['first','last',False]:
+                breakpoint()
+            else:
+                print(f'Warning: Duplicated timestamps in: {fileName}\n{self.dataTable.index[self.dataTable.index.duplicated(keep=False)].values}')
+                print(f"{self.dataTable.index.duplicated(keep=self.keep).sum()} records will be dropped, kepp={self.keep}")
+                self.dataTable = self.dataTable.loc[~self.dataTable.index.duplicated(keep=self.keep)].copy()
         return (self.dataTable)
 
 class TOA5(csiTable):
 
-    def __init__(self):
+    def __init__(self,kwargs={}):
         self.fileFormat = 'TOA5'
         self.headerRows = 4
-        super().__init__()
+        super().__init__(kwargs)
 
     def readTOA5(self,fileName):
         with open(fileName,'r') as fileObject:
@@ -80,13 +96,16 @@ def parseFrequency(text,debug=False):
     return(freq)
 
 class TOB3(csiTable):
-    def __init__(self,stepSize=1):#Stepsize can expedite reading if user only wants to know durration covered by TOB3 and/or extract headers
+    def __init__(self,kwargs={}):#Stepsize can expedite reading if user only wants to know durration covered by TOB3 and/or extract headers
         self.fileFormat = 'TOB3'
         self.headerRows = 6
         self.headerSize = 12
         self.footerSize = 4
-        self.stepSize=stepSize
-        super().__init__()
+        if 'stepSize' in kwargs:
+            self.stepSize=kwargs['stepSize']
+        else:
+            self.stepSize = 1
+        super().__init__(kwargs)
 
     def readTOB3(self,fileName):
         self.fileSize = os.path.getsize(fileName)
@@ -107,11 +126,11 @@ class TOB3(csiTable):
 
     def translateTypes(self,dtypes):
         csiTypeMap = {
-                    'FP2':{'struct':'H','output':'<f4'},
-                    'IEEE4B':{'struct':'f','output':'<f4'},
-                    'IEEE8B':{'struct':'d','output':'<f8'},
-                    'LONG':{'struct':'l','output':'<i8'},
-                    'INT4':{'struct':'i','output':'<i4'},
+                    'FP2':{'struct':'H','output':'float32'},
+                    'IEEE4B':{'struct':'f','output':'float32'},
+                    'IEEE8B':{'struct':'d','output':'float64'},
+                    'LONG':{'struct':'l','output':'int64'},
+                    'INT4':{'struct':'i','output':'int32'},
                     'ASCII':{'struct':'s','output':'str'},
                 }
         self.byteMap = []
@@ -141,6 +160,7 @@ class TOB3(csiTable):
             for row,ix in zip(rows,indices):
                 data.append(row)
                 index.append(ix)
+        self.header[5] = self.dtypes
         if len(index) == 0:
             self.dataTable = pd.DataFrame(
                 data=data,
