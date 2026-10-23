@@ -1,8 +1,8 @@
 {
-    "columnNames":["variableName","units","processing","dataType","instrumentID"],
+    "columnNames":["variableName","dataType","units","processing","ID"],
     "indexName":"timestamp",
-    "kwargDefaults":{
-        "duplicates":{"keep":"first"},
-        "dataNames":null
+    "kwargs":{
+        "keepDuplicates":"first",
+        "metadataOverwrite":{}
     }
 }

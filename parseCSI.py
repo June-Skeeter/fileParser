@@ -10,78 +10,6 @@ import re
 with open(os.path.join(os.path.split(__file__)[0],'templates','settings.json')) as f:
     settings = json.load(f)
 
-# @dataclass(kw_only=True)
-class csiTable:
-
-    def __init__(self,kwargs):
-        if kwargs == {}:
-            kwargs = settings['kwargDefaults']
-        self.campbellBaseTime = 631152000.0
-        if 'duplicates' in kwargs and 'keep' in kwargs['duplicates']:
-            self.keep = kwargs['duplicates']['keep']
-        else:
-            print('Warning: no keep method specified for duplicates: ',(settings['kwargDefaults']))
-            self.keep = None
-            breakpoint()
-
-    def parseHeader(self,fileObject):
-        # Read header and parse common parameters between formats
-        def readHeaderLine(line):
-            if type(line) == str:
-                return(line.strip().replace('"','').split(','))
-            else:
-                return(line.decode('ascii').strip().replace('"','').split(','))
-        self.header = [readHeaderLine(fileObject.readline()) for l in range(self.headerRows)]
-        if self.header[0][0] != self.fileFormat:
-            return
-        self.stationName=self.header[0][1]
-        self.loggerModel=self.header[0][2]
-        self.serialNumber=self.header[0][3]
-        self.program=self.header[0][5]
-
-    def read(self,fileName):
-        print(f'Reading: {fileName}')
-        if self.fileFormat == 'TOA5':
-            self.readTOA5(fileName)
-        elif self.fileFormat == 'TOB3':
-            self.readTOB3(fileName)
-        if self.dataTable.index.duplicated().sum():
-            if self.keep is None:
-                exit((f'Warning: Duplicated timestamps in: {fileName}\n{self.dataTable.index[self.dataTable.index.duplicated(keep=False)].values}specify kwargs duplicates methods in kwagrs'))
-            elif self.keep not in ['first','last',False]:
-                breakpoint()
-            else:
-                print(f'Warning: Duplicated timestamps in: {fileName}\n{self.dataTable.index[self.dataTable.index.duplicated(keep=False)].values}')
-                print(f"{self.dataTable.index.duplicated(keep=self.keep).sum()} records will be dropped, kepp={self.keep}")
-                self.dataTable = self.dataTable.loc[~self.dataTable.index.duplicated(keep=self.keep)].copy()
-        return (self.dataTable)
-
-class TOA5(csiTable):
-
-    def __init__(self,kwargs={}):
-        self.fileFormat = 'TOA5'
-        self.headerRows = 4
-        super().__init__(kwargs)
-
-    def readTOA5(self,fileName):
-        with open(fileName,'r') as fileObject:
-            self.parseHeader(fileObject)
-            self.tableName = self.header[0][-1]
-            def to_numeric(s):
-                try:
-                    if 'TIMESTAMP' in s.name:
-                        return(s)
-                    elif 'RECORD' in s.name:
-                        return(s.astype('<u4'))
-                    return(s.astype('<f4'))
-                except ValueError:
-                    return s
-            self.dataTable = pd.read_csv(fileObject,names=self.header[1]).apply(to_numeric)
-        self.dataTable.columns=pd.MultiIndex.from_tuples([(self.header[1][i],self.header[2][i],self.header[3][i],str(self.dataTable.dtypes.iloc[i])) for i in range(len(self.header[1]))],names=settings['columnNames'])
-        self.dataTable.index = pd.to_datetime(self.dataTable[self.dataTable.columns[0]],format='ISO8601')
-        self.dataTable.index.name = settings['indexName']
-
-
 def parseFrequency(text,debug=False):
     def split_digit(s):
         match = re.search(r"\d", s)
@@ -94,6 +22,101 @@ def parseFrequency(text,debug=False):
         freq = re.sub(key.lower(), value, freq, flags=re.IGNORECASE)
     freq = re.sub(r'[^a-zA-Z0-9.]','',freq)
     return(freq)
+
+def to_numeric(s):
+    try:
+        if 'TIMESTAMP' in s.name:
+            return(s)
+        elif 'RECORD' in s.name:
+            return(s.astype('<u4'))
+        return(s.astype('<f4'))
+    except ValueError:
+        return s
+
+class csiTable:
+    def __init__(self,kwargs={}):
+        self.kwargs = settings['kwargs'] | kwargs
+        self.campbellBaseTime = 631152000.0
+
+    def parseHeader(self,fileObject):
+        # Read header and parse common parameters between formats
+        def readHeaderLine(line):
+            if type(line) == str:
+                return(line.strip().replace('"','').split(','))
+            else:
+                return(line.decode('ascii').strip().replace('"','').split(','))
+        self.headerRows = [readHeaderLine(fileObject.readline()) for l in range(self.headerRows)]
+        if self.headerRows[0][0] != self.fileFormat:
+            return
+        self.stationName=self.headerRows[0][1]
+        self.loggerModel=self.headerRows[0][2]
+        self.serialNumber=self.headerRows[0][3]
+        self.program=self.headerRows[0][5]
+
+    def userProvidedColumns(self):
+        breakpoint()
+
+    def read(self,fileName):
+        print(f'Reading: {fileName}')
+        if self.fileFormat == 'TOA5':
+            self.readTOA5(fileName)
+        elif self.fileFormat == 'TOB3':
+            self.readTOB3(fileName)
+        self.setColumns()
+
+        if self.dataTable.index.duplicated().sum():
+            if self.kwargs['keepDuplicates'] is None or self.kwargs['keepDuplicates'] not in ['first','last',False,'shift']:
+                exit((f'Warning: Duplicated timestamps in: {fileName}\n{self.dataTable.index[self.dataTable.index.duplicated(keep=False)].values}specify set kwargs["keepDuplicates"] to one of ["first","Last",False,"shift"] in order to proceed'))
+            elif self.kwargs['keepDuplicates'] == 'shift':
+                interval = self.dataTable.index.diff().median()
+                cix = pd.Series(self.dataTable.index)
+                dix = cix.duplicated().index
+                for d in dix:
+                    cix[cix>=cix[d]]+=interval
+                breakpoint()
+                self.dataTable.index = pd.Index(cix,name=settings['indexName'])
+            else:
+                print(f'Warning: Duplicated timestamps in: {fileName}\n{self.dataTable.index[self.dataTable.index.duplicated(keep=False)].values}')
+                print(f"{self.dataTable.index.duplicated(keep=self.kwargs['keepDuplicates']).sum()} records will be dropped, kepp={self.kwargs['keepDuplicates']}")
+                self.dataTable = self.dataTable.loc[~self.dataTable.index.duplicated(keep=self.kwargs['keepDuplicates'])].copy()
+        return (self.dataTable)
+
+    def setColumns(self):
+        self.columns = {param:self.headerColumns[param] if param in self.headerColumns else ['' for i in self.headerColumns['variableName']]
+            for param in settings['columnNames']
+        }
+        self.columns['dataType'] = list(self.dataTable.dtypes)
+        if self.kwargs['metadataOverwrite']:
+            for ix,overwrite in self.kwargs['metadataOverwrite'].items():
+                if isinstance(ix,str):
+                    ix = [i for i,v in enumerate(self.columns['variableName']) if v == ix][0]
+                for key,value in overwrite.items():
+                    self.columns[key][ix] = value
+        self.dataTable.columns = pd.MultiIndex.from_tuples(
+            [tuple([
+                self.columns[param][i] for param in self.columns.keys()
+            ]) for i,_ in enumerate(self.columns['variableName'])],
+            names=settings['columnNames']
+        )
+
+class TOA5(csiTable):
+    def __init__(self,kwargs={}):
+        self.fileFormat = 'TOA5'
+        self.headerRows = 4
+        super().__init__(kwargs)
+
+    def readTOA5(self,fileName):
+        with open(fileName,'r') as fileObject:
+            self.parseHeader(fileObject)
+            self.headerColumns = {
+                'variableName':self.headerRows[1],
+                'units':self.headerRows[2],
+                'processing':self.headerRows[3]
+            }
+            self.tableName = self.headerRows[0][-1]
+            self.dataTable = pd.read_csv(fileObject,names=self.headerColumns['variableName']).apply(to_numeric)
+        self.dataTable.index = pd.Index(pd.to_datetime(self.dataTable[self.dataTable.columns[0]],format='ISO8601'),name=settings['indexName'])
+        self.recordNumber = self.dataTable['RECORD']
 
 class TOB3(csiTable):
     def __init__(self,kwargs={}):#Stepsize can expedite reading if user only wants to know durration covered by TOB3 and/or extract headers
@@ -111,18 +134,37 @@ class TOB3(csiTable):
         self.fileSize = os.path.getsize(fileName)
         with open(fileName,'rb') as fileObject:
             self.parseHeader(fileObject)
-            self.dataIntervalSeconds = pd.to_timedelta(parseFrequency(self.header[1][1])).total_seconds()
-            self.frameSize = int(self.header[1][2])
-            self.tableSize = int(self.header[1][3])
-            self.validationStamp = int(self.header[1][4])
+            self.headerColumns = {
+                'variableName':self.headerRows[2],
+                'dataTypes':self.translateTypes(self.headerRows[5]),
+                'units':self.headerRows[3],
+                'processing':self.headerRows[4]
+            }
+            self.dataIntervalSeconds = pd.to_timedelta(parseFrequency(self.headerRows[1][1])).total_seconds()
+            self.frameSize = int(self.headerRows[1][2])
+            self.tableSize = int(self.headerRows[1][3])
+            self.validationStamp = int(self.headerRows[1][4])
             self.compValidationStamp=(0xFFFF^self.validationStamp)
-            self.frameResolution = pd.to_timedelta(parseFrequency(self.header[1][5])).total_seconds()
+            self.frameResolution = pd.to_timedelta(parseFrequency(self.headerRows[1][5])).total_seconds()
             self.nframes = int((self.fileSize-fileObject.tell())/self.frameSize)
-            self.dtypes = self.translateTypes(self.header[5])
+            self.dtypes = self.translateTypes(self.headerRows[5])
             self.recordSize = struct.calcsize('>'+self.byteMap)
             self.recordsPerFrame = int((self.frameSize-self.headerSize-self.footerSize)/self.recordSize)
             self.byteMap_Body = '>'+''.join([self.byteMap for r in range(self.recordsPerFrame)])
-            self.readFrames(fileObject.read())
+            index,data = self.readFrames(fileObject.read())
+        if len(index) == 0:
+            self.dataTable = pd.DataFrame()
+            return
+        index = pd.DataFrame(index,columns=['seconds','nanoseconds','RECORD'])
+        self.recordNumber = index['RECORD']
+        self.dataTable = pd.DataFrame(
+            data=data,
+            columns=self.headerColumns['variableName'],
+            index=pd.Index(
+                pd.to_datetime(index['seconds']*1e9+index['nanoseconds'],unit='ns'),
+                name=settings['indexName']
+                )
+        )
 
     def translateTypes(self,dtypes):
         csiTypeMap = {
@@ -160,23 +202,8 @@ class TOB3(csiTable):
             for row,ix in zip(rows,indices):
                 data.append(row)
                 index.append(ix)
-        self.header[5] = self.dtypes
-        if len(index) == 0:
-            self.dataTable = pd.DataFrame(
-                data=data,
-                index=pd.Index(index,name=settings['indexName']),
-                columns=pd.MultiIndex.from_tuples([tuple([self.header[k][j] for k in range(2,6)]) for j in range(len(self.header[2]))],names=settings['columnNames'])
-                )
-        else:
-            index = pd.DataFrame(index)
-            index=pd.to_datetime(index[0]*1e9+index[1],unit='ns')
-            self.dataTable = pd.DataFrame(
-                data=data,
-                index=pd.Index(index,name=settings['indexName']),
-                columns=pd.MultiIndex.from_tuples([tuple([self.header[k][j] for k in range(2,6)]) for j in range(len(self.header[2]))],names=settings['columnNames'])
-                )
-            self.dataTable = self.dataTable.astype({c:self.dtypes[i] for i,c in enumerate(self.dataTable.columns)})
-        
+        return(index,data)
+    
     def decodeFrame(self,chunk):
         frame = [struct.unpack('iii', chunk[:self.headerSize]),
                  struct.unpack(self.byteMap_Body, chunk[self.headerSize:-self.footerSize]),
@@ -228,8 +255,13 @@ class TOB3(csiTable):
         for ix in FP2_ix:
             Body[ix] = FP2_map(Body[ix])
         return(Body)
-    
+
+# testFile = "/mnt/e/data-dump/RDEC1/decompress/TOA5_79570.Flux_CSFormat_8.dat"
+# tmp = TOA5().read(testFile)
+# # breakpoint()
+
 # T1 = time.time()
-# testFile='/mnt/e/data-dump/SCL/2026/20260801/57840_Flux_CSFormat_33.dat'
-# tmp = TOB3().read(testFile)
+# testFile='/mnt/e/data-dump/SCL/2026/20260411/57840_Flux_CSFormat_2.dat'
+# tmp = TOB3({'keepDuplicates':'shift','metadataOverwrite':{'TA_1_1_1':{'ID':'xyz'},1:{'ID':'abc'}}}).read(testFile)
 # print(time.time()-T1)
+# # breakpoint()
