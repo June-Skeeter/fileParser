@@ -56,14 +56,14 @@ class csiTable:
     def userProvidedColumns(self):
         breakpoint()
 
-    def read(self,fileName):
+    def read(self,fileName,preview=False):
         print(f'Reading: {fileName}')
         if self.fileFormat == 'TOA5':
-            self.readTOA5(fileName)
+            self.readTOA5(fileName,preview)
         elif self.fileFormat == 'TOB3':
-            self.readTOB3(fileName)
+            self.readTOB3(fileName,preview)
         elif self.fileFormat == 'MixedArray':
-            self.readArray(fileName)
+            self.readArray(fileName,preview)
         self.setColumns()
 
         if self.dataTable.index.duplicated().sum():
@@ -106,7 +106,7 @@ class TOA5(csiTable):
         self.headerRows = 4
         super().__init__(kwargs)
 
-    def readTOA5(self,fileName):
+    def readTOA5(self,fileName,preview=False):
         with open(fileName,'r') as fileObject:
             self.parseHeader(fileObject)
             self.headerColumns = {
@@ -131,7 +131,7 @@ class TOB3(csiTable):
             self.stepSize = 1
         super().__init__(kwargs)
 
-    def readTOB3(self,fileName):
+    def readTOB3(self,fileName,preview=False):
         self.fileSize = os.path.getsize(fileName)
         with open(fileName,'rb') as fileObject:
             self.parseHeader(fileObject)
@@ -153,10 +153,11 @@ class TOB3(csiTable):
             self.recordsPerFrame = int((self.frameSize-self.headerSize-self.footerSize)/self.recordSize)
             self.byteMap_Body = '>'+''.join([self.byteMap for r in range(self.recordsPerFrame)])
             self.typeMap_Body = self.dtypes*self.recordsPerFrame
-            index,data = self.readFrames(fileObject.read())
-        if len(index) == 0:
-            self.dataTable = pd.DataFrame()
-            return
+            if not preview:
+                index,data = self.readFrames(fileObject.read())
+            else:
+                index = []
+                data = []
         index = pd.DataFrame(index,columns=['timestamp','RECORD'])
         self.recordNumber = index['RECORD']
         self.dataTable = pd.DataFrame(
@@ -237,10 +238,11 @@ class TOB3(csiTable):
   
     def decode_fp2(self,Body):
         # adapted from: https://github.com/ansell/camp2ascii/tree/cea750fb721df3d3ccc69fe7780b372d20a8160d
-        def FP2_map(int):
-            sign = (0x8000 & int) >> 15
-            exponent =  (0x6000 & int) >> 13 
-            mantissa = (0x1FFF & int)       
+        def FP2_map(val):
+            val = int(val)
+            sign = (0x8000 & val) >> 15
+            exponent =  (0x6000 & val) >> 13 
+            mantissa = (0x1FFF & val)       
             if exponent == 0: 
                 Fresult=mantissa
             elif exponent == 1:
@@ -341,7 +343,7 @@ class MixedArray(csiTable):
                 ix += 1
                 if ix ==3: ix = 0
 
-    def readArray(self,fileName):
+    def readArray(self,fileName,preview=False):
         self.dataTable = pd.read_csv(fileName,names = self.headerColumns['variableName'])
         self.dataTable.index = pd.Index(
             pd.to_datetime(
@@ -360,7 +362,8 @@ class MixedArray(csiTable):
 # tmp = TOA5().read(testFile)
 
 # T1 = time.time()
-testFile='/mnt/e/data-dump/SCL/2024/20240724/Flux_Data242.dat'
-# testFile='/mnt/e/data-dump/SCL/2024/20240912/Flux_Data465.dat'
-tmp = TOB3({'keepDuplicates':'shift'}).read(testFile)
+# # testFile='/mnt/e/data-dump/SCL/2024/20240724/Flux_Data242.dat'
+# testFile='/mnt/d/data-dump/SCL/2024/20240912/Flux_Data465.dat'
+# tmp = TOB3({'keepDuplicates':'shift'}).read(testFile,preview=True)
 # print(time.time()-T1)
+# breakpoint()
