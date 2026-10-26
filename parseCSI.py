@@ -62,6 +62,8 @@ class csiTable:
             self.readTOA5(fileName)
         elif self.fileFormat == 'TOB3':
             self.readTOB3(fileName)
+        elif self.fileFormat == 'MixedArray':
+            self.readArray(fileName)
         self.setColumns()
 
         if self.dataTable.index.duplicated().sum():
@@ -73,7 +75,6 @@ class csiTable:
                 dix = cix.duplicated().index
                 for d in dix:
                     cix[cix>=cix[d]]+=interval
-                breakpoint()
                 self.dataTable.index = pd.Index(cix,name=settings['indexName'])
             else:
                 print(f'Warning: Duplicated timestamps in: {fileName}\n{self.dataTable.index[self.dataTable.index.duplicated(keep=False)].values}')
@@ -85,9 +86,9 @@ class csiTable:
         self.columns = {param:self.headerColumns[param] if param in self.headerColumns else ['' for i in self.headerColumns['variableName']]
             for param in settings['columnNames']
         }
-        self.columns['dataType'] = list(self.dataTable.dtypes)
-        if self.kwargs['metadataOverwrite']:
-            for ix,overwrite in self.kwargs['metadataOverwrite'].items():
+        self.columns['dataType'] = [str(d) for d in self.dataTable.dtypes]
+        if self.kwargs['columnHeaderOverwrite']:
+            for ix,overwrite in self.kwargs['columnHeaderOverwrite'].items():
                 if isinstance(ix,str):
                     ix = [i for i,v in enumerate(self.columns['variableName']) if v == ix][0]
                 for key,value in overwrite.items():
@@ -95,7 +96,7 @@ class csiTable:
         self.dataTable.columns = pd.MultiIndex.from_tuples(
             [tuple([
                 self.columns[param][i] for param in self.columns.keys()
-            ]) for i,_ in enumerate(self.columns['variableName'])],
+            ]) for i,_ in enumerate(self.dataTable.columns)],
             names=settings['columnNames']
         )
 
@@ -151,20 +152,23 @@ class TOB3(csiTable):
             self.recordSize = struct.calcsize('>'+self.byteMap)
             self.recordsPerFrame = int((self.frameSize-self.headerSize-self.footerSize)/self.recordSize)
             self.byteMap_Body = '>'+''.join([self.byteMap for r in range(self.recordsPerFrame)])
+            self.typeMap_Body = self.dtypes*self.recordsPerFrame
             index,data = self.readFrames(fileObject.read())
         if len(index) == 0:
             self.dataTable = pd.DataFrame()
             return
-        index = pd.DataFrame(index,columns=['seconds','nanoseconds','RECORD'])
+        index = pd.DataFrame(index,columns=['timestamp','RECORD'])
         self.recordNumber = index['RECORD']
         self.dataTable = pd.DataFrame(
             data=data,
             columns=self.headerColumns['variableName'],
             index=pd.Index(
-                pd.to_datetime(index['seconds']*1e9+index['nanoseconds'],unit='ns'),
+                pd.to_datetime(index['timestamp'],unit='s'),
                 name=settings['indexName']
-                )
+                ),
         )
+        self.dataTable.index=self.dataTable.index.round(f'{self.frameResolution}s')
+        self.dataTable = self.dataTable.astype({c:d for c,d in zip(self.dataTable.columns,self.dtypes)},errors='ignore')
 
     def translateTypes(self,dtypes):
         csiTypeMap = {
@@ -205,32 +209,31 @@ class TOB3(csiTable):
         return(index,data)
     
     def decodeFrame(self,chunk):
-        frame = [struct.unpack('iii', chunk[:self.headerSize]),
-                 struct.unpack(self.byteMap_Body, chunk[self.headerSize:-self.footerSize]),
-                 struct.unpack('i',chunk[-self.footerSize:])[0]]
-        frame[0] = [int((frame[0][0]+self.campbellBaseTime)),int((frame[0][1]*self.frameResolution)*1e9),frame[0][2]]
-        if 'H' in self.byteMap_Body:
-            frame[1] = self.decode_fp2(frame[1])
-        npr = int(len(frame[1])/self.recordsPerFrame)
-        frame[1] = [frame[1][i*npr:(i+1)*npr] for i in range(self.recordsPerFrame)]
-        # True/False flag for valid frame
         # Adapted from https://github.com/ansell/camp2ascii/blob/cea750fb721df3d3ccc69fe7780b372d20a8160d/frame_read.c#L109
-        
-        footerValidation = (0xFFFF0000 & frame[2]) >> 16
-        footerOffset = (0x000007FF & frame[2])
-        frame[2] = (footerValidation == self.validationStamp)
-        # For handling partial frames
-        if frame[2] and footerOffset > 0:
-            d = self.frameSize-(footerOffset+self.headerSize+self.footerSize)
-            if d:
-                offset = int(d/self.recordSize)
-            else:
-                offset = 0
+        def Header(chunk):
+            Head = struct.unpack('iii', chunk)
+            TS = np.dtype('float64').type(Head[0]+self.campbellBaseTime+Head[1]*self.frameResolution)
+            RN = np.dtype('int32').type(Head[2])
+            return([
+                [TS+i*self.dataIntervalSeconds,RN+i]
+                for i in range(self.recordsPerFrame)])
+        def Body(chunk):
+            body = [np.dtype((self.typeMap_Body)[i]).type(vx) for i,vx in enumerate(struct.unpack(self.byteMap_Body, chunk))]
+            if 'H' in self.byteMap_Body:
+                body = self.decode_fp2(body)
+            npr = int(len(body)/self.recordsPerFrame)
+            body = [body[i*npr:(i+1)*npr] for i in range(self.recordsPerFrame)]
+            return(body)        
+        def Footer(chunk):
+            Footer = struct.unpack('i',chunk[-self.footerSize:])[0]
+            # True/False flag for valid frame
+            footerValidation = (0xFFFF0000 & Footer) >> 16
+            footerOffset = (0x000007FF & Footer)
+            return(footerValidation == self.validationStamp and footerOffset == 0)
+        if Footer(chunk[-self.footerSize:]):
+            return(Header(chunk[:self.headerSize]),Body(chunk[self.headerSize:-self.footerSize]))
         else:
-            offset = self.recordsPerFrame
-        index = [[int((frame[0][0]+frame[0][1]*1e-9+self.dataIntervalSeconds*i)//1),int((frame[0][1]+self.dataIntervalSeconds*i*1e9) % 1e9),frame[0][2]+i] for i in range(self.recordsPerFrame) if i<offset and frame[2]]
-        data = [frame[1][i] for i in range(self.recordsPerFrame) if i < offset and frame[2]]
-        return(index,data)
+            return([],[])
   
     def decode_fp2(self,Body):
         # adapted from: https://github.com/ansell/camp2ascii/tree/cea750fb721df3d3ccc69fe7780b372d20a8160d
@@ -256,12 +259,108 @@ class TOB3(csiTable):
             Body[ix] = FP2_map(Body[ix])
         return(Body)
 
+    
+class MixedArray(csiTable):
+    def __init__(self,kwargs={'fileNameDef':None}):
+        self.fileFormat = 'MixedArray'
+        super().__init__(kwargs)
+        if self.kwargs['fileNameDef'] is None or not os.path.isfile(self.kwargs['fileNameDef']):
+            print(self.kwargs['fileNameDef'])
+            exit('Give path to def file in kwargs as fileNameDef')
+        self.readDEF(kwargs['fileNameDef'])
+
+
+    def readDEF(self,fileNameDef):
+        # self.sourceID = self.fileFormat+'_'+os.path.split(self.templateFile)[-1].split('.')[0]
+        with open(fileNameDef,'r',encoding='utf-8-sig') as f:
+            lines = f.readlines()
+        Header,header = '',True
+        Wiring,wiring = '',False
+        Labels,labels = {},False
+        tableID,Tables,tables,ntables = None,{},False,0
+        for i,l in enumerate(lines):
+            if 'Output_Table' in l or tables:
+                tables = True
+                if 'Output_Table' in l:
+                    ntables += 1
+                    tableID,self.dataIntervalSeconds = [m.strip() for m in l.split('Output_Table')]
+                    self.dataIntervalSeconds = pd.to_timedelta(parseFrequency(self.dataIntervalSeconds)).total_seconds()
+                    tableID = int(tableID)
+                    Tables[tableID] = ''
+                else:
+                    Tables[tableID]  = Tables[tableID]+l
+            elif 'Table Entries' in l:
+                entries = True
+            elif 'Labels' in l or labels:
+                labels = True
+                if 'Labels' not in l:
+                    l = l.split()
+                    if len(l):
+                        if not l[0].isdigit():
+                            sensor = '_'.join(l)
+                        else:
+                            Labels[l[1]]=sensor
+            elif 'Wiring' in l or wiring:
+                if 'Wiring' in l:
+                    self.loggerModel = l.split('for ')[-1].rstrip('-\n')
+                wiring = True
+                Wiring = Wiring+l
+            elif header:
+                Header = Header+l
+        for ID in Tables:
+            # data = {param:[] for param in settings['columnNames']}
+            self.headerColumns = {'variableName':[],
+                                'dataType':[],
+                                'units':[],
+                                'processing':[]
+                                }
+            ix = 0
+            for v in Tables[ID].split():
+                if ix == 1:
+                    if v == str(ID):
+                        self.headerColumns['variableName'].append(f'ID_{v}')
+                        self.headerColumns['dataType'].append('uint16')
+                    else:
+                        self.headerColumns['variableName'].append(v)
+                        if v.endswith('TRM'):
+                            self.headerColumns['dataType'].append('uint16')
+                        else:
+                            self.headerColumns['dataType'].append('float32')
+                    operation = v.split('_')[-1]
+                    if operation not in ['AVG','STD','MAX','MIN','TOT']:
+                        operation = ''
+                    r = v.rstrip(f'_{operation}').split('_')
+                    if r[-1][0].isdigit():
+                        r.pop(-1)
+                    if len(r)>1:
+                        unit = r[-1]
+                    else:
+                        unit = ''
+                    self.headerColumns['units'].append(unit)
+                    self.headerColumns['processing'].append(operation)
+                ix += 1
+                if ix ==3: ix = 0
+
+    def readArray(self,fileName):
+        self.dataTable = pd.read_csv(fileName,names = self.headerColumns['variableName'])
+        self.dataTable.index = pd.Index(
+            pd.to_datetime(
+                self.dataTable['Year_RTM'].astype(str)+'-'+self.dataTable['Day_RTM'].astype(str),format='%Y-%j'
+                )+pd.to_timedelta(
+                    self.dataTable['Hour_Minute_RTM'].astype(str).str.zfill(4).str[:2]+':'+
+                    self.dataTable['Hour_Minute_RTM'].astype(str).str.zfill(4).str[2:4]+':00'
+                    ),
+            name=settings['indexName'])
+        self.dataTable = self.dataTable.astype({key:value for key,value in zip(self.headerColumns['variableName'],self.headerColumns['dataType'])})
+
+
+
+# tmp = MixedArray({'fileNameDef':"/mnt/e/data-dump/SCL/2024/20240914/OverWinter.DEF"}).read(fileName="/mnt/e/data-dump/SCL/2025/20250414/WX_data.dat")
 # testFile = "/mnt/e/data-dump/RDEC1/decompress/TOA5_79570.Flux_CSFormat_8.dat"
 # tmp = TOA5().read(testFile)
-# # breakpoint()
 
 # T1 = time.time()
-# testFile='/mnt/e/data-dump/SCL/2026/20260411/57840_Flux_CSFormat_2.dat'
-# tmp = TOB3({'keepDuplicates':'shift','metadataOverwrite':{'TA_1_1_1':{'ID':'xyz'},1:{'ID':'abc'}}}).read(testFile)
+testFile='/mnt/e/data-dump/SCL/2024/20240724/Flux_Data242.dat'
+# testFile='/mnt/e/data-dump/SCL/2024/20240912/Flux_Data465.dat'
+tmp = TOB3({'keepDuplicates':'shift'}).read(testFile)
 # print(time.time()-T1)
-# # breakpoint()

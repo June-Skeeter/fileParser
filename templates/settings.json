@@ -3,6 +3,6 @@
     "indexName":"timestamp",
     "kwargs":{
         "keepDuplicates":"first",
-        "metadataOverwrite":{}
+        "columnHeaderOverwrite":{}
     }
 }

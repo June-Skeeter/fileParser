@@ -41,8 +41,8 @@ class HOBOcsv:
         self.columns['variableName'] = list(self.dataTable.columns)
         self.columns['dataType'] = list(self.dataTable.dtypes.values)
         
-        if self.kwargs['metadataOverwrite']:
-            for ix,overwrite in self.kwargs['metadataOverwrite'].items():
+        if self.kwargs['columnHeaderOverwrite']:
+            for ix,overwrite in self.kwargs['columnHeaderOverwrite'].items():
                 if isinstance(ix,str):
                     ix = [i for i,v in enumerate(self.columns['variableName']) if v == ix][0]
                 for key,value in overwrite.items():
@@ -61,7 +61,7 @@ class HOBOcsv:
 # tf = ['2026/20260930/20750527-SHSC.WSM.SGT.250718.csv','2025/20250718/20750528-SHSC.SSM.SGT.240720_250718.csv','2025/20250718/20750528-SHSC.SSM.SGT.csv']
 # testFile='/mnt/e/data-dump/SCL/'
 # for t in tf:
-#     tmp = HOBOcsv({'metadataOverwrite':{0:{'variableName':'TS_5cm'},1:{'variableName':'TS_10cm'},2:{'variableName':'TS_50cm'},3:{'variableName':'TS_100cm'}}}).read(os.path.join(testFile,t))
+#     tmp = HOBOcsv({'columnHeaderOverwrite':{0:{'variableName':'TS_5cm'},1:{'variableName':'TS_10cm'},2:{'variableName':'TS_50cm'},3:{'variableName':'TS_100cm'}}}).read(os.path.join(testFile,t))
 #     print(tmp.head())
 # print(time.time()-T1)
 # breakpoint()
