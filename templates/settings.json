@@ -1,8 +1,10 @@
 {
-    "columnNames":["variableName","dataType","units","processing","ID"],
+    "columnNames":["variableName","dataType","units","processing","instrumentID"],
     "indexName":"timestamp",
     "kwargs":{
         "keepDuplicates":"first",
-        "columnHeaderOverwrite":{}
+        "columnHeaderOverwrite":{},
+        "timezone":"UTC",
+        "_comments":" For timezone, specify IANA string format, e.g. Ect/GMT-y or Ameria/Vancouver are both acceptible for vancouver BC"
     }
 }

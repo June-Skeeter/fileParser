@@ -38,6 +38,7 @@ class csiTable:
         self.kwargs = settings['kwargs'] | kwargs
         self.campbellBaseTime = 631152000.0
 
+
     def parseHeader(self,fileObject):
         # Read header and parse common parameters between formats
         def readHeaderLine(line):
@@ -65,17 +66,16 @@ class csiTable:
         elif self.fileFormat == 'MixedArray':
             self.readArray(fileName,preview)
         self.setColumns()
-
+        self.dataTable.index = self.dataTable.index.tz_localize(self.kwargs['timezone'])
         if self.dataTable.index.duplicated().sum():
             if self.kwargs['keepDuplicates'] is None or self.kwargs['keepDuplicates'] not in ['first','last',False,'shift']:
                 exit((f'Warning: Duplicated timestamps in: {fileName}\n{self.dataTable.index[self.dataTable.index.duplicated(keep=False)].values}specify set kwargs["keepDuplicates"] to one of ["first","Last",False,"shift"] in order to proceed'))
             elif self.kwargs['keepDuplicates'] == 'shift':
-                interval = self.dataTable.index.diff().median()
-                cix = pd.Series(self.dataTable.index)
-                dix = cix.duplicated().index
-                for d in dix:
-                    cix[cix>=cix[d]]+=interval
-                self.dataTable.index = pd.Index(cix,name=settings['indexName'])
+                print(f"{self.dataTable.index.duplicated().sum()} duplicated reodrds.  Timestamp will be shifted by {self.dataTable.index.diff().median().total_seconds()}s")
+                self.dataTable.index = pd.Index(
+                    pd.date_range(start=self.dataTable.index[0],periods=len(self.dataTable.index),freq=f'{self.dataTable.index.diff().median().total_seconds()}s'),
+                    name=settings['indexName']
+                )
             else:
                 print(f'Warning: Duplicated timestamps in: {fileName}\n{self.dataTable.index[self.dataTable.index.duplicated(keep=False)].values}')
                 print(f"{self.dataTable.index.duplicated(keep=self.kwargs['keepDuplicates']).sum()} records will be dropped, kepp={self.kwargs['keepDuplicates']}")
@@ -354,7 +354,6 @@ class MixedArray(csiTable):
                     ),
             name=settings['indexName'])
         self.dataTable = self.dataTable.astype({key:value for key,value in zip(self.headerColumns['variableName'],self.headerColumns['dataType'])})
-
 
 
 # tmp = MixedArray({'fileNameDef':"/mnt/e/data-dump/SCL/2024/20240914/OverWinter.DEF"}).read(fileName="/mnt/e/data-dump/SCL/2025/20250414/WX_data.dat")

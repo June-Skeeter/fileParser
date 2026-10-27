@@ -34,7 +34,7 @@ class HOBOcsv:
         ix = [c for c in self.dataTable.columns if 'Date' in c or 'Time' in c]
         index = self.dataTable[ix].agg(' '.join,axis=1)
         self.dataTable = self.dataTable.drop(columns=ix)
-        self.dataTable.index = pd.Index(pd.to_datetime(index,yearfirst=True),name=settings['indexName'])
+        self.dataTable.index = pd.Index(pd.to_datetime(index,yearfirst=True),name=settings['indexName']).tz_localize(self.kwargs['timezone'])
         float_cols = self.dataTable.select_dtypes(include=["float64"]).columns
         self.dataTable[float_cols] = self.dataTable[float_cols].astype('float32')
         self.columns = {param:['' for i in range(self.dataTable.shape[1])] for param in settings['columnNames']}
